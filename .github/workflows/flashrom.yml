@@ -1,0 +1,58 @@
+name: flashrom-static-amd64
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch: 
+
+jobs:
+  build-static-alpine:
+    name: Build Static Binary
+    runs-on: ubuntu-latest
+    container: 
+      image: alpine:latest
+
+    steps:
+      - name: Install build dependencies
+        run: |
+          apk add --no-cache \
+            git build-base meson ninja pkgconf \
+            libusb-dev libftdi1-dev libjaylink-dev libftdi1-static \
+            linux-headers zlib-dev eudev-dev wget file
+
+      - name: Build static pciutils
+        run: |
+          cd /tmp
+          wget https://mj.ucw.cz/download/linux/pci/pciutils-3.10.0.tar.gz
+          tar -xzf pciutils-3.10.0.tar.gz
+          cd pciutils-3.10.0
+          sed -i '1i #include <libgen.h>' lib/sysfs.c
+          make SHARED=no ZLIB=no DNS=no HWDB=no PREFIX=/usr install install-lib
+
+      - name: Clone flashrom from upstream
+        run: |
+          git clone https://github.com/flashrom/flashrom.git .
+
+      - name: Configure build
+        run: |
+          LDFLAGS="-static" meson setup builddir \
+            --prefer-static \
+            --buildtype=release \
+            -Ddefault_library=static \
+            -Dtests=disabled \
+            -Dwerror=false
+
+      - name: Compile & strip binary
+        run: |
+          meson compile -C builddir
+          strip builddir/flashrom
+
+      - name: Verify static linkage
+        run: |
+          file builddir/flashrom
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: flashrom-static-amd64
+          path: builddir/flashrom
